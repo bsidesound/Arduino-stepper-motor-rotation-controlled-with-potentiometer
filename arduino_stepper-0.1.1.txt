@@ -1,0 +1,151 @@
+/* Stepper 0.1.1 (some bugs corrected with respect to version 0.1)
+ * -------
+ *
+ * Program to drive a Mitsumi M42SP-5, 50 Ohm, stepper motor.
+ *
+ * The motor has 7.5 step angle (48 steps for 360 degrees).
+ * The rated voltage is 12V.
+ * The excitation method is 2-2 phase excitation with unipolar driving.
+ *
+ * For further details see
+ *
+ * http://dscl.lcsr.jhu.edu/main/images/7/73/MitsumiStepMotor.pdf
+ *
+ * The 5 wires are:
+ *
+ * Black: Coil A
+ * Red: Coil B
+ * Yellow: Coil C
+ * Orange: Coil D
+ * White: Common
+ *
+ * Coils have been identified with the procedure described here:
+ *
+ * http://www.easterngeek.com/2010/06/how-to-identify-stepper-motor-lead.html
+ *
+ * Wires have been connected to Arduino as follows:
+ *
+ * Black --> Pin 8
+ * Red --> Pin 9
+ * Yellow --> Pin 10
+ * Orange --> Pin 11
+ *
+ * In order to power the motor with 12V, the procedure based on the
+ * ULN2003 described here has been used:
+ *
+ * http://arduino.cc/forum/index.php/topic,13711.0.html
+ *
+ * In the present case, the red wire in the pictures is connected to
+ * the white wire coming out of the stepper motor.
+ *
+ * For writing the code, I used the information in these pages:
+ *
+ * http://playground.arduino.cc/Code/BitMath
+ * http://arduino.cc/en/Reference/IntegerConstants
+ *
+ * A 10 kohm pot has been used for controlling the motor position.
+ * This pot is used as described in
+ *
+ * http://arduino.cc/en/Tutorial/AnalogReadSerial
+ *
+ * The left outer pin of the pot was connected to ground.
+ * The right outer pin of the pot was connected to 5V.
+ * The middle pin of the pot was connected to A0 analog input.
+ *
+ *
+ * @author: Matteo Grigoletto
+ * @date: February 6, 2013
+ */
+
+int motorPins[] = {8, 9, 10, 11};
+int count = 0;
+int delayTime1 = 50; // delay between analog reads
+int delayTime2 = 8;  // delay between motor steps
+int ns = 0; // number of steps
+int newread = 0; // pot position (0 - 1023)
+int oldread = 0; // old pot position (0 - 1023)
+int pos = 0; // motor position (in 96 half steps)
+int oldpos = 0; // old motor position
+unsigned long startTime = 0;
+
+const byte excitSeq[8] = { // excitation sequence (half steps)
+  B0001000, // only coil A
+  B0001100, // coil A and B
+  B0000100, // only coil B
+  B0000110, // coil B and C
+  B0000010, // only coil C
+  B0000011, // coil C and D
+  B0000001, // only coil D
+  B0001001, // coil D and A
+};
+
+void stepMotor(int ns,int dt) { // ns: number of steps, dt: delay time
+
+  for (byte s=0; s<abs(ns); ++s) {
+    if (ns > 0) count++; else count--;
+    if (count == 8) count = 0;
+    if (count == -1) count = 7;
+    byte data = excitSeq[count];
+    for (byte y=0; y<4; ++y) { // playground.arduino.cc/Code/BitMath
+      if (data & (1<<y)) {
+        digitalWrite(motorPins[3-y], HIGH); // turn on coil 3-y+1
+      } else {
+        digitalWrite(motorPins[3-y], LOW);  // turn off coil 3-y+1
+      }
+    }
+    delay(dt);
+    /* Serial.println(data,BIN); */
+  }
+}
+
+void releaseMotor() {
+  for (byte y=0; y<4; ++y) digitalWrite(motorPins[3-y], LOW);
+}
+
+void setup() {
+
+  for (count = 0; count < 4; count++) {
+    pinMode(motorPins[count], OUTPUT);
+  }
+  Serial.begin(9600);
+
+  newread = oldread = analogRead(A0);
+  pos = oldpos = map(newread,0,1023,0,96); // arduino.cc/en/Reference/map
+}
+
+
+void loop() {
+
+  unsigned long loopTime = millis() - startTime;
+
+  newread = analogRead(A0);
+
+  /* Pots can have small resistance oscillations that can cause
+     the motor to keep making a positive step immediately followed
+     by a negative step. Here we avoid this behavior by being
+     sensitive only to variations grater than a threshold. */
+
+  if (abs(newread - oldread) > 1) {
+    pos = map(newread,0,1023,0,96);
+    oldread = newread;
+    if (pos != oldpos) {
+      ns = pos - oldpos;
+      stepMotor(ns,delayTime2);
+      startTime = millis();
+      oldpos = pos;
+    }
+  }
+
+  delay(delayTime1);
+
+  if (loopTime > 20000){ // this is to avoid the motor becoming
+    releaseMotor();      // burning hot
+    startTime = millis();
+  }    
+
+  /*
+  Serial.println(analogRead(A0));
+  Serial.println(pos);
+  Serial.println(ns);
+  */
+}
